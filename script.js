@@ -85,6 +85,22 @@
     return `${hh}:${mm}:${ss}`;
   }
 
+  function formatResetLabel(ms) {
+    if (ms <= 0) return '已重置';
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const hh = String(hours).padStart(2, '0');
+    const mm = String(minutes).padStart(2, '0');
+    const ss = String(seconds).padStart(2, '0');
+    if (days > 0) {
+      return `還有${days}天${hh}:${mm}:${ss}重置`;
+    }
+    return `還有${hh}:${mm}:${ss}重置`;
+  }
+
   function formatLocalTime(date) {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -376,9 +392,14 @@
         `;
       }
 
+      const countdownId = type !== 'onetime' ? `taskGroupReset-${event.id}-${type}` : null;
+      const countdownHtml = countdownId
+        ? `<span class="task-group-countdown" id="${countdownId}"></span>`
+        : '';
+
       groupsHtml += `
         <div class="task-group">
-          <div class="task-group-header">${typeLabels[type]}</div>
+          <div class="task-group-header">${typeLabels[type]}${countdownHtml}</div>
           ${tasksHtml}
         </div>
       `;
@@ -769,25 +790,31 @@
       const timeEl = document.getElementById(`currentTime-${event.id}`);
       if (timeEl) timeEl.textContent = `目前時間：${formatLocalTime(now)}`;
 
-      // Daily countdown
+      const nextDaily = getNextDailyReset();
+      const nextWeekly = getNextWeeklyReset();
+      const nextBiweekly = getNextBiweeklyReset(event.startDate);
+
+      // Time info countdowns
       const dailyEl = document.getElementById(`dailyReset-${event.id}`);
-      if (dailyEl) {
-        const nextDaily = getNextDailyReset();
-        dailyEl.textContent = formatCountdown(nextDaily.getTime() - now.getTime());
-      }
+      if (dailyEl) dailyEl.textContent = formatCountdown(nextDaily.getTime() - now.getTime());
 
-      // Weekly countdown
       const weeklyEl = document.getElementById(`weeklyReset-${event.id}`);
-      if (weeklyEl) {
-        const nextWeekly = getNextWeeklyReset();
-        weeklyEl.textContent = formatCountdown(nextWeekly.getTime() - now.getTime());
-      }
+      if (weeklyEl) weeklyEl.textContent = formatCountdown(nextWeekly.getTime() - now.getTime());
 
-      // Biweekly countdown
       const biweeklyEl = document.getElementById(`biweeklyReset-${event.id}`);
-      if (biweeklyEl) {
-        const nextBiweekly = getNextBiweeklyReset(event.startDate);
-        biweeklyEl.textContent = formatCountdown(nextBiweekly.getTime() - now.getTime());
+      if (biweeklyEl) biweeklyEl.textContent = formatCountdown(nextBiweekly.getTime() - now.getTime());
+
+      // Task group header countdowns
+      const groupResetMap = {
+        daily: nextDaily,
+        weekly: nextWeekly,
+        biweekly: nextBiweekly
+      };
+      for (const type in groupResetMap) {
+        const el = document.getElementById(`taskGroupReset-${event.id}-${type}`);
+        if (el) {
+          el.textContent = formatResetLabel(groupResetMap[type].getTime() - now.getTime());
+        }
       }
     }
 

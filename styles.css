@@ -421,6 +421,17 @@ header h2 {
     margin-bottom: 8px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--input-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.task-group-countdown {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .task-item {

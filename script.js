@@ -162,22 +162,47 @@
   function addHistoryEntry(state, type, source, amount) {
     if (!state.history) state.history = {};
     const dateKey = getUTCDateKey(new Date());
-    if (!state.history[dateKey]) state.history[dateKey] = [];
-    state.history[dateKey].push({ type, source, amount });
+    if (!state.history[dateKey]) state.history[dateKey] = {};
+    const key = type + ':' + source;
+    if (state.history[dateKey][key]) {
+      state.history[dateKey][key].amount += amount;
+    } else {
+      state.history[dateKey][key] = { type, source, amount };
+    }
   }
 
   function removeHistoryEntry(state, type, source, amount) {
     if (!state.history) return;
+    const key = type + ':' + source;
     const dates = Object.keys(state.history).sort().reverse();
     for (const dateKey of dates) {
-      const entries = state.history[dateKey];
-      for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i].type === type && entries[i].source === source && entries[i].amount === amount) {
-          entries.splice(i, 1);
-          if (entries.length === 0) delete state.history[dateKey];
-          return;
+      const dayMap = state.history[dateKey];
+      if (dayMap[key]) {
+        dayMap[key].amount -= amount;
+        if (dayMap[key].amount <= 0) {
+          delete dayMap[key];
+        }
+        if (Object.keys(dayMap).length === 0) delete state.history[dateKey];
+        return;
+      }
+    }
+  }
+
+  function migrateHistoryArrayToMap(state) {
+    if (!state.history) return;
+    for (const dateKey in state.history) {
+      const dayData = state.history[dateKey];
+      if (!Array.isArray(dayData)) continue;
+      const dayMap = {};
+      for (const entry of dayData) {
+        const key = entry.type + ':' + entry.source;
+        if (dayMap[key]) {
+          dayMap[key].amount += entry.amount;
+        } else {
+          dayMap[key] = { type: entry.type, source: entry.source, amount: entry.amount };
         }
       }
+      state.history[dateKey] = dayMap;
     }
   }
 
@@ -191,30 +216,31 @@
 
     state.history = {};
     const dateKey = getUTCDateKey(new Date());
+    state.history[dateKey] = {};
 
     for (const taskId in state.tasks) {
       const totalReward = state.tasks[taskId].totalReward || 0;
       if (totalReward > 0) {
-        if (!state.history[dateKey]) state.history[dateKey] = [];
-        state.history[dateKey].push({ type: 'earn', source: taskId, amount: totalReward });
+        state.history[dateKey]['earn:' + taskId] = { type: 'earn', source: taskId, amount: totalReward };
       }
       delete state.tasks[taskId].totalReward;
     }
 
     for (const m of event.checkin.milestones) {
       if (state.checkin.count >= m.day) {
-        if (!state.history[dateKey]) state.history[dateKey] = [];
-        state.history[dateKey].push({ type: 'earn', source: `checkin_day${m.day}`, amount: m.reward });
+        const source = `checkin_day${m.day}`;
+        state.history[dateKey]['earn:' + source] = { type: 'earn', source, amount: m.reward };
       }
     }
 
     for (const item of event.shop) {
       const qty = state.shop[item.id] || 0;
-      for (let i = 0; i < qty; i++) {
-        if (!state.history[dateKey]) state.history[dateKey] = [];
-        state.history[dateKey].push({ type: 'spend', source: item.id, amount: item.cost });
+      if (qty > 0) {
+        state.history[dateKey]['spend:' + item.id] = { type: 'spend', source: item.id, amount: qty * item.cost };
       }
     }
+
+    if (Object.keys(state.history[dateKey]).length === 0) delete state.history[dateKey];
 
     return true;
   }
@@ -257,7 +283,9 @@
       const raw = localStorage.getItem(STORAGE_PREFIX + eventId);
       if (raw) {
         const parsed = JSON.parse(raw);
-        return Object.assign(getDefaultState(), parsed);
+        const state = Object.assign(getDefaultState(), parsed);
+        migrateHistoryArrayToMap(state);
+        return state;
       }
     } catch (e) {
       console.warn('Failed to load state:', e);
@@ -296,7 +324,9 @@
 
     if (state.history) {
       for (const dateKey in state.history) {
-        for (const entry of state.history[dateKey]) {
+        const dayMap = state.history[dateKey];
+        for (const key in dayMap) {
+          const entry = dayMap[key];
           if (entry.type === 'earn') totalEarned += entry.amount;
           else if (entry.type === 'spend') totalSpent += entry.amount;
         }
@@ -563,7 +593,13 @@
 
       groupsHtml += `
         <div class="task-group">
-          <div class="task-group-header">${typeLabels[type]}${countdownHtml}</div>
+          <div class="task-group-header">
+            <span>${typeLabels[type]}</span>
+            <div class="task-group-header-right">
+              ${countdownHtml}
+              <span class="task-group-npc-label">任務NPC</span>
+            </div>
+          </div>
           ${tasksHtml}
         </div>
       `;
@@ -660,6 +696,7 @@
         </div>
         ${cardSelectHtml}
         ${rewardHtml}
+        ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
       </div>
       ${cardInfoHtml}
     `;
@@ -703,6 +740,7 @@
           <span class="task-note">${task.note || ''}</span>
         </div>
         <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
+        ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
       </div>
       ${bonusHtml}
     `;
@@ -1333,26 +1371,16 @@
     let bodyHtml = '';
 
     for (const dateKey of dates) {
-      const entries = (state.history[dateKey] || []).filter(e => e.type === filterType);
+      const dayMap = state.history[dateKey] || {};
+      const entries = Object.values(dayMap).filter(e => e.type === filterType);
       if (entries.length === 0) continue;
 
-      // Aggregate same-source entries per day
-      const aggregated = {};
-      for (const e of entries) {
-        if (!aggregated[e.source]) {
-          aggregated[e.source] = { source: e.source, amount: 0, count: 0 };
-        }
-        aggregated[e.source].amount += e.amount;
-        aggregated[e.source].count++;
-      }
-
-      const dayTotal = Object.values(aggregated).reduce((sum, a) => sum + a.amount, 0);
+      const dayTotal = entries.reduce((sum, e) => sum + e.amount, 0);
 
       let entriesHtml = '';
-      for (const agg of Object.values(aggregated)) {
-        const name = resolveSourceName(event, agg.source);
-        const countLabel = agg.count > 1 ? ` x${agg.count}` : '';
-        entriesHtml += `<div class="history-entry"><span>${name}${countLabel}</span><span>${sign}${agg.amount}</span></div>`;
+      for (const entry of entries) {
+        const name = resolveSourceName(event, entry.source);
+        entriesHtml += `<div class="history-entry"><span>${name}</span><span>${sign}${entry.amount}</span></div>`;
       }
 
       bodyHtml += `

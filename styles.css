@@ -619,6 +619,21 @@ header h2 {
     white-space: nowrap;
 }
 
+.task-group-header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.task-group-npc-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    min-width: 72px;
+    text-align: right;
+}
+
 .task-item {
     display: flex;
     align-items: center;
@@ -683,6 +698,18 @@ header h2 {
     white-space: nowrap;
     margin-left: 12px;
     flex-shrink: 0;
+    min-width: 80px;
+    text-align: right;
+}
+
+.task-npc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: 8px;
+    flex-shrink: 0;
+    min-width: 72px;
+    text-align: right;
 }
 
 .task-item.has-card-info {
@@ -1066,6 +1093,16 @@ footer {
         margin-left: 32px;
         margin-top: 4px;
         width: 100%;
+        min-width: unset;
+        text-align: left;
+    }
+
+    .task-npc {
+        display: none;
+    }
+
+    .task-group-npc-label {
+        display: none;
     }
 
     .shop-item {

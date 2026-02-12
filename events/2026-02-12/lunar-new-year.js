@@ -12,27 +12,27 @@ const EVENTS = [
     currency: '紅包',
     tasks: {
       daily: [
-        { id: 'lion_battle', name: '吉祥獅獅大作戰', reward: 1, note: '打怪掉落鞭炮後使用' }
+        { id: 'lion_battle', name: '吉祥獅獅大作戰', reward: 1, note: '打怪掉落鞭炮後使用', npc: 'GM露露' }
       ],
       weekly: [
-        { id: 'horse_soldier', name: '相信木馬士兵吧！', note: '依卡片種類擇一兌換',
+        { id: 'horse_soldier', name: '相信木馬士兵吧！', note: '依卡片種類擇一兌換', npc: '加加',
           cardSelect: [
             { card: 3, reward: 1, label: 'Lv.3 卡片' },
             { card: 4, reward: 2, label: 'Lv.4 卡片' },
             { card: 5, reward: 5, label: 'Lv.5 卡片', bonusWeeks: [1, 3, 5], altRewardLabel: '加倍券' }
           ]
         },
-        { id: 'reunion_dinner', name: '想吃熱騰騰的團圓飯', reward: 1, note: '收集食材各 10 個' },
-        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包' },
-        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包', streakBonus: { targetWeeks: 3, reward: 20 } },
-        { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得' }
+        { id: 'reunion_dinner', name: '想吃熱騰騰的團圓飯', reward: 1, note: '收集食材各 10 個', npc: 'GM露露' },
+        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包', npc: '維多利亞港npc' },
+        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包', npc: 'GM露露', streakBonus: { targetWeeks: 3, reward: 20 } },
+        { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得', npc: '薇薇安' }
       ],
       biweekly: [
-        { id: 'team_quest', name: '滿滿春節組隊任務', reward: 3, note: '需組隊完成，含協作憑證獎勵' }
+        { id: 'team_quest', name: '滿滿春節組隊任務', reward: 3, note: '需組隊完成，含協作憑證獎勵', npc: 'GM露露' }
       ],
       onetime: [
-        { id: 'spring_cleaning', name: '迎接春節的大掃除', reward: 10, note: '打怪收集垃圾堆 x30' },
-        { id: 'elder_stan', name: '心繫孩子的長老斯坦', reward: 3, note: '打怪收集年糕 x30' }
+        { id: 'spring_cleaning', name: '迎接春節的大掃除', reward: 10, note: '打怪收集垃圾堆 x30', npc: 'GM露露' },
+        { id: 'elder_stan', name: '心繫孩子的長老斯坦', reward: 3, note: '打怪收集年糕 x30', npc: '長老斯坦' }
       ]
     },
     checkin: {

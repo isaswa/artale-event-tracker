@@ -121,6 +121,15 @@
     return 'active';
   }
 
+  function getEventWeekNumber(eventStartDate) {
+    const start = new Date(eventStartDate + 'T00:00:00Z');
+    const now = new Date();
+    const currentThursday = getMostRecentThursday(now);
+    const diffMs = currentThursday.getTime() - start.getTime();
+    const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+    return diffWeeks + 1;
+  }
+
   // ===== Helpers =====
 
   function findTask(event, taskId) {
@@ -537,8 +546,28 @@
       rewardHtml = `<span class="task-reward">+${task.reward} ${event.currency}</span>`;
     }
 
+    let bonusHtml = '';
+    let hasBonus = '';
+    if (task.weeklyBonus) {
+      hasBonus = ' has-bonus';
+      const weekNum = getEventWeekNumber(event.startDate);
+      const isBonusWeek = task.weeklyBonus.weeks.includes(weekNum);
+      const weeksLabel = task.weeklyBonus.weeks.join('/');
+
+      let bonusClass = 'task-bonus';
+      if (isBonusWeek && completed) bonusClass += ' claimed';
+      else if (isBonusWeek) bonusClass += ' active';
+
+      bonusHtml = `
+        <div class="${bonusClass}">
+          <span>第${weeksLabel}週額外獎勵${isBonusWeek && completed ? ' ✓' : isBonusWeek ? ' (本週)' : ''}</span>
+          <span>+${task.weeklyBonus.amount} ${event.currency}</span>
+        </div>
+      `;
+    }
+
     return `
-      <div class="task-item ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
+      <div class="task-item${hasBonus} ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
         <input type="checkbox" class="task-checkbox"
           id="task-${event.id}-${task.id}"
           data-event="${event.id}"
@@ -554,6 +583,7 @@
         </div>
         ${rewardHtml}
       </div>
+      ${bonusHtml}
     `;
   }
 
@@ -839,12 +869,24 @@
     const taskState = state.tasks[taskId];
     const periodKey = getPeriodKey(taskType, new Date(), event.startDate);
 
+    const taskDef = findTask(event, taskId);
+
     if (checkbox.checked) {
       const reward = maxReward;
       taskState.currentPeriod = periodKey;
       taskState.currentReward = reward;
       addHistoryEntry(state, 'earn', taskId, reward);
+
+      if (taskDef && taskDef.weeklyBonus) {
+        const weekNum = getEventWeekNumber(event.startDate);
+        if (taskDef.weeklyBonus.weeks.includes(weekNum)) {
+          addHistoryEntry(state, 'earn', taskId + '_bonus', taskDef.weeklyBonus.amount);
+        }
+      }
     } else {
+      if (taskDef && taskDef.weeklyBonus) {
+        removeHistoryEntry(state, 'earn', taskId + '_bonus', taskDef.weeklyBonus.amount);
+      }
       removeHistoryEntry(state, 'earn', taskId, taskState.currentReward || 0);
       taskState.currentPeriod = null;
       taskState.currentReward = 0;
@@ -852,13 +894,13 @@
 
     saveState(event.id, state);
 
-    const taskItem = document.getElementById(`taskItem-${event.id}-${taskId}`);
-    if (taskItem) {
-      taskItem.classList.toggle('completed', checkbox.checked);
-    }
-
-    if (isVariable) {
+    if (isVariable || (taskDef && taskDef.weeklyBonus)) {
       rerenderTasks(event, state);
+    } else {
+      const taskItem = document.getElementById(`taskItem-${event.id}-${taskId}`);
+      if (taskItem) {
+        taskItem.classList.toggle('completed', checkbox.checked);
+      }
     }
 
     updateSummaryDisplay(event, state);
@@ -1041,6 +1083,11 @@
   // ===== History Modal =====
 
   function resolveSourceName(event, source) {
+    if (source.endsWith('_bonus')) {
+      const baseId = source.replace('_bonus', '');
+      const task = findTask(event, baseId);
+      if (task) return task.name + ' (額外獎勵)';
+    }
     const task = findTask(event, source);
     if (task) return task.name;
     const shopItem = event.shop.find(i => i.id === source);

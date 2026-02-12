@@ -17,8 +17,8 @@ const EVENTS = [
       weekly: [
         { id: 'horse_soldier', name: '相信木馬士兵吧！', reward: 5, minReward: 1, note: '依卡片種類擇一兌換 (1~5個)', variable: true },
         { id: 'reunion_dinner', name: '想吃熱騰騰的團圓飯', reward: 1, note: '收集食材各 10 個' },
-        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, note: '2 分鐘挑戰' },
-        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, note: '1 分鐘挑戰' },
+        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '2 分鐘挑戰，每次1個紅包' },
+        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '1 分鐘挑戰，每次1個紅包' },
         { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得' }
       ],
       biweekly: [

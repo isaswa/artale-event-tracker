@@ -3,6 +3,7 @@
 
   const STORAGE_PREFIX = 'artale_event_';
   let timerInterval = null;
+  let currentEventId = null;
 
   // ===== Date/Time Utilities =====
 
@@ -16,7 +17,7 @@
 
   function getMostRecentThursday(date) {
     const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-    const day = d.getUTCDay(); // 0=Sun, 4=Thu
+    const day = d.getUTCDay();
     const diff = (day - 4 + 7) % 7;
     d.setUTCDate(d.getUTCDate() - diff);
     return d;
@@ -120,13 +121,114 @@
     return 'active';
   }
 
+  // ===== Helpers =====
+
+  function findTask(event, taskId) {
+    for (const type of ['daily', 'weekly', 'biweekly', 'onetime']) {
+      const found = (event.tasks[type] || []).find(t => t.id === taskId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function getSelectedEvent() {
+    const saved = localStorage.getItem('artale_selected_event');
+    const sorted = [...EVENTS].sort((a, b) => b.startDate.localeCompare(a.startDate));
+    return sorted.find(e => e.id === saved) || sorted[0];
+  }
+
+  // ===== History Helpers =====
+
+  function addHistoryEntry(state, type, source, amount) {
+    if (!state.history) state.history = {};
+    const dateKey = getUTCDateKey(new Date());
+    if (!state.history[dateKey]) state.history[dateKey] = [];
+    state.history[dateKey].push({ type, source, amount });
+  }
+
+  function removeHistoryEntry(state, type, source, amount) {
+    if (!state.history) return;
+    const dates = Object.keys(state.history).sort().reverse();
+    for (const dateKey of dates) {
+      const entries = state.history[dateKey];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].type === type && entries[i].source === source && entries[i].amount === amount) {
+          entries.splice(i, 1);
+          if (entries.length === 0) delete state.history[dateKey];
+          return;
+        }
+      }
+    }
+  }
+
+  function migrateStateToHistory(event, state) {
+    if (state.history && Object.keys(state.history).length > 0) return false;
+
+    const hasOldData = Object.values(state.tasks).some(t => t.totalReward > 0) ||
+      state.checkin.count > 0 ||
+      Object.values(state.shop).some(v => v > 0);
+    if (!hasOldData) return false;
+
+    state.history = {};
+    const dateKey = getUTCDateKey(new Date());
+
+    for (const taskId in state.tasks) {
+      const totalReward = state.tasks[taskId].totalReward || 0;
+      if (totalReward > 0) {
+        if (!state.history[dateKey]) state.history[dateKey] = [];
+        state.history[dateKey].push({ type: 'earn', source: taskId, amount: totalReward });
+      }
+      delete state.tasks[taskId].totalReward;
+    }
+
+    for (const m of event.checkin.milestones) {
+      if (state.checkin.count >= m.day) {
+        if (!state.history[dateKey]) state.history[dateKey] = [];
+        state.history[dateKey].push({ type: 'earn', source: `checkin_day${m.day}`, amount: m.reward });
+      }
+    }
+
+    for (const item of event.shop) {
+      const qty = state.shop[item.id] || 0;
+      for (let i = 0; i < qty; i++) {
+        if (!state.history[dateKey]) state.history[dateKey] = [];
+        state.history[dateKey].push({ type: 'spend', source: item.id, amount: item.cost });
+      }
+    }
+
+    return true;
+  }
+
+  // ===== Section Collapse Persistence =====
+
+  function loadCollapsedState() {
+    try {
+      const raw = localStorage.getItem('artale_collapsed');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function isSectionCollapsed(sectionKey) {
+    return loadCollapsedState()[sectionKey] || false;
+  }
+
+  function toggleCollapsedState(sectionKey) {
+    const state = loadCollapsedState();
+    state[sectionKey] = !state[sectionKey];
+    localStorage.setItem('artale_collapsed', JSON.stringify(state));
+    return state[sectionKey];
+  }
+
   // ===== State Management =====
 
   function getDefaultState() {
     return {
       tasks: {},
       checkin: { count: 0, lastDate: null },
-      shop: {}
+      shop: {},
+      history: {}
     };
   }
 
@@ -160,26 +262,25 @@
     return taskState.currentPeriod === currentPeriod;
   }
 
+  function getTaskCurrentClaims(taskId, taskType, state, eventStartDate) {
+    const taskState = state.tasks[taskId];
+    if (!taskState || !taskState.currentPeriod) return 0;
+    const currentPeriod = getPeriodKey(taskType, new Date(), eventStartDate);
+    if (taskState.currentPeriod !== currentPeriod) return 0;
+    return taskState.currentClaims || 0;
+  }
+
   function calculateTotals(event, state) {
     let totalEarned = 0;
-
-    // From tasks
-    for (const taskId in state.tasks) {
-      totalEarned += state.tasks[taskId].totalReward || 0;
-    }
-
-    // From check-in milestones
-    for (const milestone of event.checkin.milestones) {
-      if (state.checkin.count >= milestone.day) {
-        totalEarned += milestone.reward;
-      }
-    }
-
-    // Total spent in shop
     let totalSpent = 0;
-    for (const item of event.shop) {
-      const qty = state.shop[item.id] || 0;
-      totalSpent += qty * item.cost;
+
+    if (state.history) {
+      for (const dateKey in state.history) {
+        for (const entry of state.history[dateKey]) {
+          if (entry.type === 'earn') totalEarned += entry.amount;
+          else if (entry.type === 'spend') totalSpent += entry.amount;
+        }
+      }
     }
 
     return {
@@ -193,40 +294,60 @@
 
   function renderApp() {
     const app = document.getElementById('app');
-    if (!app || typeof EVENTS === 'undefined') return;
+    if (!app || typeof EVENTS === 'undefined' || EVENTS.length === 0) return;
 
-    let html = '';
-    for (const event of EVENTS) {
-      const state = loadState(event.id);
-      html += renderEvent(event, state);
+    const selected = getSelectedEvent();
+    currentEventId = selected.id;
+    const state = loadState(selected.id);
+
+    if (migrateStateToHistory(selected, state)) {
+      saveState(selected.id, state);
     }
+
+    let html = renderEventSelector(selected.id);
+    html += renderEventContent(selected, state);
     app.innerHTML = html;
 
-    // Bind all event handlers
-    for (const event of EVENTS) {
-      const state = loadState(event.id);
-      bindEventHandlers(event, state);
-    }
+    bindEventSelector();
+    bindEventHandlers(selected, state);
 
-    // Start countdown timer
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(updateTimers, 1000);
     updateTimers();
   }
 
-  function renderEvent(event, state) {
-    const status = getEventStatus(event);
-    const statusText = { active: '進行中', upcoming: '即將開始', ended: '已結束' }[status];
+  function renderEventSelector(selectedId) {
+    const sorted = [...EVENTS].sort((a, b) => b.startDate.localeCompare(a.startDate));
+
+    let tabsHtml = '';
+    for (const event of sorted) {
+      const isActive = event.id === selectedId;
+      const status = getEventStatus(event);
+      const statusText = { active: '進行中', upcoming: '即將開始', ended: '已結束' }[status];
+      tabsHtml += `
+        <button class="event-tab ${isActive ? 'active' : ''}" data-event-id="${event.id}">
+          <span class="event-tab-name">${event.name}</span>
+          <span class="event-tab-badge ${status}">${statusText}</span>
+        </button>
+      `;
+    }
+
+    const selected = sorted.find(e => e.id === selectedId);
+    const dateInfo = `${selected.startDate.replace(/-/g, '/')} ~ ${selected.endDate.replace(/-/g, '/')} (結束日不含)`;
+
+    return `
+      <div class="event-selector-wrapper">
+        <div class="event-selector">${tabsHtml}</div>
+        <div class="event-dates" id="eventDates">${dateInfo}</div>
+      </div>
+    `;
+  }
+
+  function renderEventContent(event, state) {
     const totals = calculateTotals(event, state);
 
     return `
       <div class="event" data-event-id="${event.id}">
-        <div class="event-header">
-          <h3>${event.name}</h3>
-          <div class="event-dates">${event.startDate.replace(/-/g, '/')} ~ ${event.endDate.replace(/-/g, '/')} (結束日不含)</div>
-          <span class="event-status ${status}">${statusText}</span>
-        </div>
-
         ${renderTimeInfo(event)}
         ${renderSummary(event, state, totals)}
         ${renderCheckin(event, state)}
@@ -264,11 +385,11 @@
   function renderSummary(event, state, totals) {
     return `
       <div class="summary">
-        <div class="summary-card earned">
+        <div class="summary-card earned" data-filter="earn" data-event="${event.id}">
           <span class="summary-value" id="totalEarned-${event.id}">${totals.earned}</span>
           <span class="summary-label">已獲得 ${event.currency}</span>
         </div>
-        <div class="summary-card spent">
+        <div class="summary-card spent" data-filter="spend" data-event="${event.id}">
           <span class="summary-value" id="totalSpent-${event.id}">${totals.spent}</span>
           <span class="summary-label">已使用 ${event.currency}</span>
         </div>
@@ -313,13 +434,19 @@
       btnHtml = `<button class="btn-checkin" id="checkinBtn-${event.id}">今日簽到</button>`;
     }
 
+    const checkinCollapsed = isSectionCollapsed(`checkin-${event.id}`);
+    const doneLabel = checkedInToday
+      ? '<span class="section-done-label">本日已完成</span>'
+      : '';
+
     return `
       <div class="section" id="checkinSection-${event.id}">
-        <div class="section-header" data-section="checkin-${event.id}">
+        <div class="section-header${checkedInToday ? ' section-header-done' : ''}" data-section="checkin-${event.id}">
           <h3>每日簽到</h3>
-          <span class="toggle-icon" id="toggleIcon-checkin-${event.id}">&#9660;</span>
+          ${doneLabel}
+          <span class="toggle-icon${checkinCollapsed ? ' collapsed' : ''}" id="toggleIcon-checkin-${event.id}">&#9660;</span>
         </div>
-        <div class="section-body" id="sectionBody-checkin-${event.id}">
+        <div class="section-body${checkinCollapsed ? ' collapsed' : ''}" id="sectionBody-checkin-${event.id}">
           <div class="checkin-status" id="checkinStatus-${event.id}">
             <span class="checkin-text">已簽到 <strong>${count}</strong> / ${maxDays} 天</span>
             <div>${btnHtml}</div>
@@ -351,45 +478,13 @@
 
       let tasksHtml = '';
       for (const task of tasks) {
-        const completed = isTaskCompleted(task.id, type, state, event.startDate);
-        const taskState = state.tasks[task.id];
-        const currentReward = (taskState && taskState.currentReward) || task.reward;
-
-        let rewardHtml;
-        if (task.variable && completed) {
-          let options = '';
-          for (let i = task.minReward; i <= task.reward; i++) {
-            options += `<option value="${i}" ${currentReward === i ? 'selected' : ''}>${i}</option>`;
-          }
-          rewardHtml = `
-            <span class="task-reward">+</span>
-            <select class="task-reward-select" data-event="${event.id}" data-task="${task.id}" data-type="${type}">${options}</select>
-            <span class="task-reward">${event.currency}</span>
-          `;
-        } else if (task.variable) {
-          rewardHtml = `<span class="task-reward">+${task.minReward}~${task.reward} ${event.currency}</span>`;
+        if (task.claims) {
+          // Multi-claim task: +/- UI
+          tasksHtml += renderMultiClaimTask(event, state, task, type);
         } else {
-          rewardHtml = `<span class="task-reward">+${task.reward} ${event.currency}</span>`;
+          // Single checkbox task
+          tasksHtml += renderCheckboxTask(event, state, task, type);
         }
-
-        tasksHtml += `
-          <div class="task-item ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
-            <input type="checkbox" class="task-checkbox"
-              id="task-${event.id}-${task.id}"
-              data-event="${event.id}"
-              data-task="${task.id}"
-              data-type="${type}"
-              data-reward="${task.reward}"
-              data-min-reward="${task.minReward || task.reward}"
-              data-variable="${!!task.variable}"
-              ${completed ? 'checked' : ''}>
-            <div class="task-info">
-              <span class="task-name">${task.name}</span>
-              <span class="task-note">${task.note || ''}</span>
-            </div>
-            ${rewardHtml}
-          </div>
-        `;
       }
 
       const countdownId = type !== 'onetime' ? `taskGroupReset-${event.id}-${type}` : null;
@@ -405,15 +500,85 @@
       `;
     }
 
+    const tasksCollapsed = isSectionCollapsed(`tasks-${event.id}`);
+
     return `
       <div class="section" id="tasksSection-${event.id}">
         <div class="section-header" data-section="tasks-${event.id}">
           <h3>任務列表</h3>
-          <span class="toggle-icon" id="toggleIcon-tasks-${event.id}">&#9660;</span>
+          <span class="toggle-icon${tasksCollapsed ? ' collapsed' : ''}" id="toggleIcon-tasks-${event.id}">&#9660;</span>
         </div>
-        <div class="section-body" id="sectionBody-tasks-${event.id}">
+        <div class="section-body${tasksCollapsed ? ' collapsed' : ''}" id="sectionBody-tasks-${event.id}">
           ${groupsHtml}
         </div>
+      </div>
+    `;
+  }
+
+  function renderCheckboxTask(event, state, task, type) {
+    const completed = isTaskCompleted(task.id, type, state, event.startDate);
+    const taskState = state.tasks[task.id];
+    const currentReward = (taskState && taskState.currentReward) || task.reward;
+
+    let rewardHtml;
+    if (task.variable && completed) {
+      let options = '';
+      for (let i = task.minReward; i <= task.reward; i++) {
+        options += `<option value="${i}" ${currentReward === i ? 'selected' : ''}>${i}</option>`;
+      }
+      rewardHtml = `
+        <span class="task-reward">+</span>
+        <select class="task-reward-select" data-event="${event.id}" data-task="${task.id}" data-type="${type}">${options}</select>
+        <span class="task-reward">${event.currency}</span>
+      `;
+    } else if (task.variable) {
+      rewardHtml = `<span class="task-reward">+${task.minReward}~${task.reward} ${event.currency}</span>`;
+    } else {
+      rewardHtml = `<span class="task-reward">+${task.reward} ${event.currency}</span>`;
+    }
+
+    return `
+      <div class="task-item ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
+        <input type="checkbox" class="task-checkbox"
+          id="task-${event.id}-${task.id}"
+          data-event="${event.id}"
+          data-task="${task.id}"
+          data-type="${type}"
+          data-reward="${task.reward}"
+          data-min-reward="${task.minReward || task.reward}"
+          data-variable="${!!task.variable}"
+          ${completed ? 'checked' : ''}>
+        <div class="task-info">
+          <span class="task-name">${task.name}</span>
+          <span class="task-note">${task.note || ''}</span>
+        </div>
+        ${rewardHtml}
+      </div>
+    `;
+  }
+
+  function renderMultiClaimTask(event, state, task, type) {
+    const claims = getTaskCurrentClaims(task.id, type, state, event.startDate);
+    const maxClaims = task.claims;
+    const isFullyDone = claims >= maxClaims;
+    const isPartial = claims > 0 && !isFullyDone;
+
+    let statusClass = '';
+    if (isFullyDone) statusClass = 'completed';
+    else if (isPartial) statusClass = 'partial';
+
+    return `
+      <div class="task-item ${statusClass}" id="taskItem-${event.id}-${task.id}">
+        <div class="task-claims-control">
+          <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="minus" ${claims <= 0 ? 'disabled' : ''}>-</button>
+          <span class="qty-display" id="taskQty-${event.id}-${task.id}">${claims}/${maxClaims}</span>
+          <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="plus" ${claims >= maxClaims ? 'disabled' : ''}>+</button>
+        </div>
+        <div class="task-info">
+          <span class="task-name">${task.name}</span>
+          <span class="task-note">${task.note || ''}</span>
+        </div>
+        <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
       </div>
     `;
   }
@@ -458,13 +623,15 @@
       `;
     }
 
+    const shopCollapsed = isSectionCollapsed(`shop-${event.id}`);
+
     return `
       <div class="section" id="shopSection-${event.id}">
         <div class="section-header" data-section="shop-${event.id}">
           <h3>${event.currency}商店</h3>
-          <span class="toggle-icon" id="toggleIcon-shop-${event.id}">&#9660;</span>
+          <span class="toggle-icon${shopCollapsed ? ' collapsed' : ''}" id="toggleIcon-shop-${event.id}">&#9660;</span>
         </div>
-        <div class="section-body" id="sectionBody-shop-${event.id}">
+        <div class="section-body${shopCollapsed ? ' collapsed' : ''}" id="sectionBody-shop-${event.id}">
           ${itemsHtml}
         </div>
       </div>
@@ -493,12 +660,24 @@
 
   // ===== Event Handlers =====
 
+  function bindEventSelector() {
+    document.querySelectorAll('.event-tab').forEach(tab => {
+      tab.addEventListener('click', function () {
+        const eventId = this.dataset.eventId;
+        if (eventId === currentEventId) return;
+        localStorage.setItem('artale_selected_event', eventId);
+        renderApp();
+      });
+    });
+  }
+
   function bindEventHandlers(event, state) {
-    // Section toggle (collapsible)
+    // Section toggle (collapsible) with persistence
     document.querySelectorAll(`[data-section]`).forEach(header => {
       const sectionKey = header.dataset.section;
       if (!sectionKey.endsWith(event.id)) return;
       header.addEventListener('click', function () {
+        toggleCollapsedState(sectionKey);
         const body = document.getElementById(`sectionBody-${sectionKey}`);
         const icon = document.getElementById(`toggleIcon-${sectionKey}`);
         if (body) body.classList.toggle('collapsed');
@@ -536,6 +715,13 @@
       });
     });
 
+    // Task +/- buttons (multi-claim)
+    document.querySelectorAll(`.task-qty-btn[data-event="${event.id}"]`).forEach(btn => {
+      btn.addEventListener('click', function () {
+        handleTaskQty(event, state, this);
+      });
+    });
+
     // Shop checkboxes (for maxQty=1 items)
     document.querySelectorAll(`.shop-checkbox[data-event="${event.id}"]`).forEach(cb => {
       cb.addEventListener('change', function () {
@@ -544,9 +730,16 @@
     });
 
     // Shop +/- buttons
-    document.querySelectorAll(`.qty-btn[data-event="${event.id}"]`).forEach(btn => {
+    document.querySelectorAll(`.qty-btn[data-event="${event.id}"]:not(.task-qty-btn)`).forEach(btn => {
       btn.addEventListener('click', function () {
         handleShopQty(event, state, this);
+      });
+    });
+
+    // Summary card click handlers (history modal)
+    document.querySelectorAll(`.summary-card[data-filter][data-event="${event.id}"]`).forEach(card => {
+      card.addEventListener('click', function () {
+        showHistoryModal(event, state, this.dataset.filter);
       });
     });
 
@@ -569,6 +762,13 @@
 
     state.checkin.count++;
     state.checkin.lastDate = todayKey;
+
+    for (const m of event.checkin.milestones) {
+      if (state.checkin.count >= m.day && state.checkin.count - 1 < m.day) {
+        addHistoryEntry(state, 'earn', `checkin_day${m.day}`, m.reward);
+      }
+    }
+
     saveState(event.id, state);
     rerenderCheckin(event, state);
     updateSummaryDisplay(event, state);
@@ -577,6 +777,12 @@
   function handleCheckinUndo(event, state) {
     const todayKey = getUTCDateKey(new Date());
     if (state.checkin.lastDate !== todayKey) return;
+
+    for (const m of event.checkin.milestones) {
+      if (state.checkin.count >= m.day && state.checkin.count - 1 < m.day) {
+        removeHistoryEntry(state, 'earn', `checkin_day${m.day}`, m.reward);
+      }
+    }
 
     state.checkin.count = Math.max(0, state.checkin.count - 1);
     state.checkin.lastDate = null;
@@ -589,14 +795,12 @@
     const section = document.getElementById(`checkinSection-${event.id}`);
     if (!section) return;
 
-    // Rebuild the checkin section content
     const temp = document.createElement('div');
     temp.innerHTML = renderCheckin(event, state);
     const newSection = temp.firstElementChild;
 
     section.replaceWith(newSection);
 
-    // Re-bind handlers for this section
     const checkinBtn = document.getElementById(`checkinBtn-${event.id}`);
     if (checkinBtn) {
       checkinBtn.addEventListener('click', function () {
@@ -609,11 +813,11 @@
         handleCheckinUndo(event, state);
       });
     }
-    // Re-bind section toggle
     const header = newSection.querySelector('.section-header');
     if (header) {
       header.addEventListener('click', function () {
         const sectionKey = this.dataset.section;
+        toggleCollapsedState(sectionKey);
         const body = document.getElementById(`sectionBody-${sectionKey}`);
         const icon = document.getElementById(`toggleIcon-${sectionKey}`);
         if (body) body.classList.toggle('collapsed');
@@ -627,35 +831,32 @@
     const taskType = checkbox.dataset.type;
     const isVariable = checkbox.dataset.variable === 'true';
     const maxReward = parseInt(checkbox.dataset.reward);
-    const minReward = parseInt(checkbox.dataset.minReward);
 
     if (!state.tasks[taskId]) {
-      state.tasks[taskId] = { currentPeriod: null, currentReward: 0, totalReward: 0 };
+      state.tasks[taskId] = { currentPeriod: null, currentReward: 0 };
     }
 
     const taskState = state.tasks[taskId];
     const periodKey = getPeriodKey(taskType, new Date(), event.startDate);
 
     if (checkbox.checked) {
-      const reward = isVariable ? maxReward : maxReward;
+      const reward = maxReward;
       taskState.currentPeriod = periodKey;
       taskState.currentReward = reward;
-      taskState.totalReward = (taskState.totalReward || 0) + reward;
+      addHistoryEntry(state, 'earn', taskId, reward);
     } else {
-      taskState.totalReward = Math.max(0, (taskState.totalReward || 0) - (taskState.currentReward || 0));
+      removeHistoryEntry(state, 'earn', taskId, taskState.currentReward || 0);
       taskState.currentPeriod = null;
       taskState.currentReward = 0;
     }
 
     saveState(event.id, state);
 
-    // Update UI
     const taskItem = document.getElementById(`taskItem-${event.id}-${taskId}`);
     if (taskItem) {
       taskItem.classList.toggle('completed', checkbox.checked);
     }
 
-    // If variable, re-render the task to show/hide the select
     if (isVariable) {
       rerenderTasks(event, state);
     }
@@ -663,11 +864,46 @@
     updateSummaryDisplay(event, state);
   }
 
+  function handleTaskQty(event, state, button) {
+    const taskId = button.dataset.task;
+    const taskType = button.dataset.type;
+    const action = button.dataset.action;
+
+    const task = findTask(event, taskId);
+    if (!task || !task.claims) return;
+
+    const periodKey = getPeriodKey(taskType, new Date(), event.startDate);
+
+    if (!state.tasks[taskId]) {
+      state.tasks[taskId] = { currentPeriod: null, currentReward: 0, currentClaims: 0 };
+    }
+
+    const taskState = state.tasks[taskId];
+    const inCurrentPeriod = taskState.currentPeriod === periodKey;
+    let claims = inCurrentPeriod ? (taskState.currentClaims || 0) : 0;
+
+    if (action === 'plus' && claims < task.claims) {
+      claims++;
+      addHistoryEntry(state, 'earn', taskId, task.rewardPerClaim);
+    } else if (action === 'minus' && claims > 0) {
+      claims--;
+      removeHistoryEntry(state, 'earn', taskId, task.rewardPerClaim);
+    } else {
+      return;
+    }
+
+    taskState.currentPeriod = claims > 0 ? periodKey : null;
+    taskState.currentClaims = claims;
+    taskState.currentReward = claims * task.rewardPerClaim;
+
+    saveState(event.id, state);
+    rerenderTasks(event, state);
+    updateSummaryDisplay(event, state);
+  }
+
   function rerenderTasks(event, state) {
     const section = document.getElementById(`tasksSection-${event.id}`);
     if (!section) return;
-
-    const wasCollapsed = section.querySelector('.section-body.collapsed') !== null;
 
     const temp = document.createElement('div');
     temp.innerHTML = renderTasks(event, state);
@@ -675,18 +911,11 @@
 
     section.replaceWith(newSection);
 
-    if (wasCollapsed) {
-      const body = newSection.querySelector('.section-body');
-      const icon = newSection.querySelector('.toggle-icon');
-      if (body) body.classList.add('collapsed');
-      if (icon) icon.classList.add('collapsed');
-    }
-
-    // Re-bind
     const header = newSection.querySelector('.section-header');
     if (header) {
       header.addEventListener('click', function () {
         const sectionKey = this.dataset.section;
+        toggleCollapsedState(sectionKey);
         const body = document.getElementById(`sectionBody-${sectionKey}`);
         const icon = document.getElementById(`toggleIcon-${sectionKey}`);
         if (body) body.classList.toggle('collapsed');
@@ -705,6 +934,26 @@
         handleRewardChange(event, state, this);
       });
     });
+
+    newSection.querySelectorAll(`.task-qty-btn[data-event="${event.id}"]`).forEach(btn => {
+      btn.addEventListener('click', function () {
+        handleTaskQty(event, state, this);
+      });
+    });
+
+    // Immediately populate countdown text so it doesn't flash empty
+    const now = new Date();
+    const groupResetMap = {
+      daily: getNextDailyReset(),
+      weekly: getNextWeeklyReset(),
+      biweekly: getNextBiweeklyReset(event.startDate)
+    };
+    for (const type in groupResetMap) {
+      const el = document.getElementById(`taskGroupReset-${event.id}-${type}`);
+      if (el) {
+        el.textContent = formatResetLabel(groupResetMap[type].getTime() - now.getTime());
+      }
+    }
   }
 
   function handleRewardChange(event, state, select) {
@@ -715,7 +964,8 @@
     if (!taskState) return;
 
     const oldReward = taskState.currentReward || 0;
-    taskState.totalReward = (taskState.totalReward || 0) - oldReward + newReward;
+    removeHistoryEntry(state, 'earn', taskId, oldReward);
+    addHistoryEntry(state, 'earn', taskId, newReward);
     taskState.currentReward = newReward;
 
     saveState(event.id, state);
@@ -724,15 +974,23 @@
 
   function handleShopCheckbox(event, state, checkbox) {
     const itemId = checkbox.dataset.item;
-    state.shop[itemId] = checkbox.checked ? 1 : 0;
+    const item = event.shop.find(i => i.id === itemId);
+    if (!item) return;
+
+    if (checkbox.checked) {
+      state.shop[itemId] = 1;
+      addHistoryEntry(state, 'spend', itemId, item.cost);
+    } else {
+      state.shop[itemId] = 0;
+      removeHistoryEntry(state, 'spend', itemId, item.cost);
+    }
     saveState(event.id, state);
 
     const shopItem = document.getElementById(`shopItem-${event.id}-${itemId}`);
     if (shopItem) shopItem.classList.toggle('purchased', checkbox.checked);
 
     const costEl = document.getElementById(`shopCost-${event.id}-${itemId}`);
-    const item = event.shop.find(i => i.id === itemId);
-    if (costEl && item) {
+    if (costEl) {
       const total = (state.shop[itemId] || 0) * item.cost;
       costEl.textContent = total > 0 ? '-' + total : '';
     }
@@ -747,12 +1005,16 @@
     if (!item) return;
 
     let qty = state.shop[itemId] || 0;
-    if (action === 'plus' && qty < item.maxQty) qty++;
-    if (action === 'minus' && qty > 0) qty--;
+    if (action === 'plus' && qty < item.maxQty) {
+      qty++;
+      addHistoryEntry(state, 'spend', itemId, item.cost);
+    } else if (action === 'minus' && qty > 0) {
+      qty--;
+      removeHistoryEntry(state, 'spend', itemId, item.cost);
+    }
     state.shop[itemId] = qty;
     saveState(event.id, state);
 
-    // Update display
     const qtyEl = document.getElementById(`shopQty-${event.id}-${itemId}`);
     if (qtyEl) qtyEl.textContent = `${qty}/${item.maxQty}`;
 
@@ -765,7 +1027,6 @@
     const shopItem = document.getElementById(`shopItem-${event.id}-${itemId}`);
     if (shopItem) shopItem.classList.toggle('purchased', qty > 0);
 
-    // Update +/- button states
     const parent = button.closest('.shop-controls');
     if (parent) {
       const minusBtn = parent.querySelector('[data-action="minus"]');
@@ -777,6 +1038,93 @@
     updateSummaryDisplay(event, state);
   }
 
+  // ===== History Modal =====
+
+  function resolveSourceName(event, source) {
+    const task = findTask(event, source);
+    if (task) return task.name;
+    const shopItem = event.shop.find(i => i.id === source);
+    if (shopItem) return shopItem.name;
+    if (source.startsWith('checkin_day')) {
+      const day = source.replace('checkin_day', '');
+      return `簽到第${day}天獎勵`;
+    }
+    return source;
+  }
+
+  function showHistoryModal(event, state, filterType) {
+    const dates = Object.keys(state.history || {}).sort().reverse();
+    const title = filterType === 'earn'
+      ? `已獲得 ${event.currency} 明細`
+      : `已使用 ${event.currency} 明細`;
+    const sign = filterType === 'earn' ? '+' : '-';
+
+    let bodyHtml = '';
+
+    for (const dateKey of dates) {
+      const entries = (state.history[dateKey] || []).filter(e => e.type === filterType);
+      if (entries.length === 0) continue;
+
+      // Aggregate same-source entries per day
+      const aggregated = {};
+      for (const e of entries) {
+        if (!aggregated[e.source]) {
+          aggregated[e.source] = { source: e.source, amount: 0, count: 0 };
+        }
+        aggregated[e.source].amount += e.amount;
+        aggregated[e.source].count++;
+      }
+
+      const dayTotal = Object.values(aggregated).reduce((sum, a) => sum + a.amount, 0);
+
+      let entriesHtml = '';
+      for (const agg of Object.values(aggregated)) {
+        const name = resolveSourceName(event, agg.source);
+        const countLabel = agg.count > 1 ? ` x${agg.count}` : '';
+        entriesHtml += `<div class="history-entry"><span>${name}${countLabel}</span><span>${sign}${agg.amount}</span></div>`;
+      }
+
+      bodyHtml += `
+        <div class="history-day">
+          <div class="history-day-header">
+            <span>${dateKey}</span>
+            <span>${sign}${dayTotal} ${event.currency}</span>
+          </div>
+          ${entriesHtml}
+        </div>
+      `;
+    }
+
+    if (!bodyHtml) {
+      bodyHtml = '<div class="history-empty">尚無記錄</div>';
+    }
+
+    const modal = document.createElement('div');
+    modal.className = `history-overlay history-${filterType}`;
+    modal.id = 'historyModal';
+    modal.innerHTML = `
+      <div class="history-modal">
+        <div class="history-modal-header">
+          <h3>${title}</h3>
+          <button class="history-close" id="historyClose">&times;</button>
+        </div>
+        <div class="history-modal-body">${bodyHtml}</div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeHistoryModal();
+    });
+    document.getElementById('historyClose').addEventListener('click', closeHistoryModal);
+  }
+
+  function closeHistoryModal() {
+    const modal = document.getElementById('historyModal');
+    if (modal) modal.remove();
+  }
+
   // ===== Timers =====
 
   let lastDailyPeriod = null;
@@ -786,7 +1134,6 @@
     const now = new Date();
 
     for (const event of EVENTS) {
-      // Current time
       const timeEl = document.getElementById(`currentTime-${event.id}`);
       if (timeEl) timeEl.textContent = `目前時間：${formatLocalTime(now)}`;
 
@@ -794,7 +1141,6 @@
       const nextWeekly = getNextWeeklyReset();
       const nextBiweekly = getNextBiweeklyReset(event.startDate);
 
-      // Time info countdowns
       const dailyEl = document.getElementById(`dailyReset-${event.id}`);
       if (dailyEl) dailyEl.textContent = formatCountdown(nextDaily.getTime() - now.getTime());
 
@@ -804,7 +1150,6 @@
       const biweeklyEl = document.getElementById(`biweeklyReset-${event.id}`);
       if (biweeklyEl) biweeklyEl.textContent = formatCountdown(nextBiweekly.getTime() - now.getTime());
 
-      // Task group header countdowns
       const groupResetMap = {
         daily: nextDaily,
         weekly: nextWeekly,
@@ -818,10 +1163,9 @@
       }
     }
 
-    // Check for period resets (auto-refresh)
     const currentDailyPeriod = getUTCDateKey(now);
     if (lastDailyPeriod && lastDailyPeriod !== currentDailyPeriod) {
-      renderApp(); // Re-render to reflect reset tasks
+      renderApp();
     }
     lastDailyPeriod = currentDailyPeriod;
 

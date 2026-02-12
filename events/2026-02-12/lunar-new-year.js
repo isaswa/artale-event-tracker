@@ -15,10 +15,16 @@ const EVENTS = [
         { id: 'lion_battle', name: '吉祥獅獅大作戰', reward: 1, note: '打怪掉落鞭炮後使用' }
       ],
       weekly: [
-        { id: 'horse_soldier', name: '相信木馬士兵吧！', reward: 2, minReward: 1, note: '依卡片種類擇一兌換 (1~2個)', variable: true, weeklyBonus: { amount: 5, weeks: [1, 3, 5] } },
+        { id: 'horse_soldier', name: '相信木馬士兵吧！', note: '依卡片種類擇一兌換',
+          cardSelect: [
+            { card: 3, reward: 1, label: 'Lv.3 卡片' },
+            { card: 4, reward: 2, label: 'Lv.4 卡片' },
+            { card: 5, reward: 5, label: 'Lv.5 卡片', bonusWeeks: [1, 3, 5], altRewardLabel: '加倍券' }
+          ]
+        },
         { id: 'reunion_dinner', name: '想吃熱騰騰的團圓飯', reward: 1, note: '收集食材各 10 個' },
         { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '2 分鐘挑戰，每次1個紅包' },
-        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '1 分鐘挑戰，每次1個紅包' },
+        { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包', streakBonus: { targetWeeks: 3, reward: 20 } },
         { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得' }
       ],
       biweekly: [

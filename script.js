@@ -130,6 +130,17 @@
     return diffWeeks + 1;
   }
 
+  function getCardReward(task, selectedCard, eventStartDate) {
+    if (!task.cardSelect) return task.reward || 0;
+    const option = task.cardSelect.find(c => c.card === selectedCard);
+    if (!option) return 0;
+    if (option.bonusWeeks) {
+      const weekNum = getEventWeekNumber(eventStartDate);
+      return option.bonusWeeks.includes(weekNum) ? option.reward : 0;
+    }
+    return option.reward;
+  }
+
   // ===== Helpers =====
 
   function findTask(event, taskId) {
@@ -299,6 +310,50 @@
     };
   }
 
+  function calculateMaxEarnable(event) {
+    let max = 0;
+    const start = new Date(event.startDate + 'T00:00:00Z');
+    const end = new Date(event.endDate + 'T00:00:00Z');
+    const totalDays = Math.floor((end - start) / (24 * 60 * 60 * 1000));
+    const totalWeeks = Math.ceil(totalDays / 7);
+    const totalBiweeks = Math.ceil(totalWeeks / 2);
+
+    for (const type of ['daily', 'weekly', 'biweekly', 'onetime']) {
+      const tasks = event.tasks[type] || [];
+      for (const task of tasks) {
+        let periods;
+        switch (type) {
+          case 'daily': periods = totalDays; break;
+          case 'weekly': periods = totalWeeks; break;
+          case 'biweekly': periods = totalBiweeks; break;
+          case 'onetime': periods = 1; break;
+        }
+        if (task.cardSelect) {
+          for (let w = 1; w <= totalWeeks; w++) {
+            let bestReward = 0;
+            for (const opt of task.cardSelect) {
+              let r = opt.reward;
+              if (opt.bonusWeeks && !opt.bonusWeeks.includes(w)) r = 0;
+              bestReward = Math.max(bestReward, r);
+            }
+            max += bestReward;
+          }
+        } else {
+          max += task.reward * periods;
+        }
+        if (task.streakBonus) {
+          max += task.streakBonus.reward;
+        }
+      }
+    }
+
+    for (const m of event.checkin.milestones) {
+      max += m.reward;
+    }
+
+    return max;
+  }
+
   // ===== Rendering =====
 
   function renderApp() {
@@ -392,15 +447,20 @@
   }
 
   function renderSummary(event, state, totals) {
+    const maxEarnable = calculateMaxEarnable(event);
+    const remaining = maxEarnable - totals.earned;
+    const totalShopCost = event.shop.reduce((sum, item) => sum + item.cost * item.maxQty, 0);
     return `
       <div class="summary">
         <div class="summary-card earned" data-filter="earn" data-event="${event.id}">
           <span class="summary-value" id="totalEarned-${event.id}">${totals.earned}</span>
           <span class="summary-label">已獲得 ${event.currency}</span>
+          <span class="summary-subtitle" id="earnedSubtitle-${event.id}">活動結束前還可以獲得: ${remaining} 個${event.currency}</span>
         </div>
         <div class="summary-card spent" data-filter="spend" data-event="${event.id}">
           <span class="summary-value" id="totalSpent-${event.id}">${totals.spent}</span>
           <span class="summary-label">已使用 ${event.currency}</span>
+          <span class="summary-subtitle">買完商店道具需要: ${totalShopCost} 個${event.currency}</span>
         </div>
         <div class="summary-card balance">
           <span class="summary-value" id="balance-${event.id}">${totals.balance}</span>
@@ -527,10 +587,49 @@
   function renderCheckboxTask(event, state, task, type) {
     const completed = isTaskCompleted(task.id, type, state, event.startDate);
     const taskState = state.tasks[task.id];
-    const currentReward = (taskState && taskState.currentReward) || task.reward;
 
     let rewardHtml;
-    if (task.variable && completed) {
+    let cardSelectHtml = '';
+    let cardInfoHtml = '';
+    let extraClass = '';
+
+    if (task.cardSelect) {
+      const selectedCard = (taskState && taskState.selectedCard) || task.cardSelect[0].card;
+      const reward = getCardReward(task, selectedCard, event.startDate);
+      const selectedOption = task.cardSelect.find(c => c.card === selectedCard);
+
+      let options = '';
+      for (const opt of task.cardSelect) {
+        options += `<option value="${opt.card}" ${selectedCard === opt.card ? 'selected' : ''}>${opt.label}</option>`;
+      }
+      cardSelectHtml = `<select class="card-select" data-event="${event.id}" data-task="${task.id}" data-type="${type}">${options}</select>`;
+
+      if (reward > 0) {
+        rewardHtml = `<span class="task-reward">+${reward} ${event.currency}</span>`;
+      } else if (selectedOption && selectedOption.altRewardLabel) {
+        rewardHtml = `<span class="task-reward task-reward-alt">${selectedOption.altRewardLabel}</span>`;
+      } else {
+        rewardHtml = `<span class="task-reward">+0 ${event.currency}</span>`;
+      }
+
+      const card5 = task.cardSelect.find(c => c.bonusWeeks);
+      if (card5) {
+        extraClass = ' has-card-info';
+        const weekNum = getEventWeekNumber(event.startDate);
+        const isBonusWeek = card5.bonusWeeks.includes(weekNum);
+        const bonusWeeksLabel = card5.bonusWeeks.join('/');
+        const allWeeks = Array.from({ length: 6 }, (_, i) => i + 1);
+        const nonBonusWeeks = allWeeks.filter(w => !card5.bonusWeeks.includes(w));
+
+        cardInfoHtml = `
+          <div class="card-info${isBonusWeek ? ' bonus-week' : ''}">
+            <span>${card5.label}：第${bonusWeeksLabel}週 +${card5.reward}${event.currency} ｜ 第${nonBonusWeeks.join('/')}週 ${card5.altRewardLabel}</span>
+            <span class="card-info-week">目前第${weekNum}週</span>
+          </div>
+        `;
+      }
+    } else if (task.variable && completed) {
+      const currentReward = (taskState && taskState.currentReward) || task.reward;
       let options = '';
       for (let i = task.minReward; i <= task.reward; i++) {
         options += `<option value="${i}" ${currentReward === i ? 'selected' : ''}>${i}</option>`;
@@ -546,44 +645,23 @@
       rewardHtml = `<span class="task-reward">+${task.reward} ${event.currency}</span>`;
     }
 
-    let bonusHtml = '';
-    let hasBonus = '';
-    if (task.weeklyBonus) {
-      hasBonus = ' has-bonus';
-      const weekNum = getEventWeekNumber(event.startDate);
-      const isBonusWeek = task.weeklyBonus.weeks.includes(weekNum);
-      const weeksLabel = task.weeklyBonus.weeks.join('/');
-
-      let bonusClass = 'task-bonus';
-      if (isBonusWeek && completed) bonusClass += ' claimed';
-      else if (isBonusWeek) bonusClass += ' active';
-
-      bonusHtml = `
-        <div class="${bonusClass}">
-          <span>第${weeksLabel}週額外獎勵${isBonusWeek && completed ? ' ✓' : isBonusWeek ? ' (本週)' : ''}</span>
-          <span>+${task.weeklyBonus.amount} ${event.currency}</span>
-        </div>
-      `;
-    }
-
     return `
-      <div class="task-item${hasBonus} ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
+      <div class="task-item${extraClass} ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
         <input type="checkbox" class="task-checkbox"
           id="task-${event.id}-${task.id}"
           data-event="${event.id}"
           data-task="${task.id}"
           data-type="${type}"
-          data-reward="${task.reward}"
-          data-min-reward="${task.minReward || task.reward}"
-          data-variable="${!!task.variable}"
+          ${task.cardSelect ? 'data-card-select="true"' : `data-reward="${task.reward}" data-min-reward="${task.minReward || task.reward}" data-variable="${!!task.variable}"`}
           ${completed ? 'checked' : ''}>
         <div class="task-info">
           <span class="task-name">${task.name}</span>
           <span class="task-note">${task.note || ''}</span>
         </div>
+        ${cardSelectHtml}
         ${rewardHtml}
       </div>
-      ${bonusHtml}
+      ${cardInfoHtml}
     `;
   }
 
@@ -597,8 +675,24 @@
     if (isFullyDone) statusClass = 'completed';
     else if (isPartial) statusClass = 'partial';
 
+    let bonusHtml = '';
+    let hasBonus = '';
+    if (task.streakBonus) {
+      hasBonus = ' has-streak-bonus';
+      const taskState = state.tasks[task.id];
+      const weeksDone = (taskState && taskState.bonusWeeksCounted) ? taskState.bonusWeeksCounted.length : 0;
+      const target = task.streakBonus.targetWeeks;
+      const bonusClaimed = weeksDone >= target;
+      bonusHtml = `
+        <div class="streak-bonus${bonusClaimed ? ' claimed' : ''}">
+          <span>完成${weeksDone}/${target}週額外獎勵${bonusClaimed ? ' ✓' : ''}</span>
+          <span>+${task.streakBonus.reward} ${event.currency}</span>
+        </div>
+      `;
+    }
+
     return `
-      <div class="task-item ${statusClass}" id="taskItem-${event.id}-${task.id}">
+      <div class="task-item${hasBonus} ${statusClass}" id="taskItem-${event.id}-${task.id}">
         <div class="task-claims-control">
           <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="minus" ${claims <= 0 ? 'disabled' : ''}>-</button>
           <span class="qty-display" id="taskQty-${event.id}-${task.id}">${claims}/${maxClaims}</span>
@@ -610,6 +704,7 @@
         </div>
         <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
       </div>
+      ${bonusHtml}
     `;
   }
 
@@ -636,6 +731,7 @@
           <button class="qty-btn" data-event="${event.id}" data-item="${item.id}" data-action="minus" ${qty <= 0 ? 'disabled' : ''}>-</button>
           <span class="qty-display" id="shopQty-${event.id}-${item.id}">${qty}/${item.maxQty}</span>
           <button class="qty-btn" data-event="${event.id}" data-item="${item.id}" data-action="plus" ${qty >= item.maxQty ? 'disabled' : ''}>+</button>
+          <button class="qty-btn shop-max-btn" data-event="${event.id}" data-item="${item.id}" ${qty >= item.maxQty ? 'disabled' : ''}>MAX</button>
         `;
       }
 
@@ -686,6 +782,13 @@
     if (earnedEl) earnedEl.textContent = totals.earned;
     if (spentEl) spentEl.textContent = totals.spent;
     if (balanceEl) balanceEl.textContent = totals.balance;
+
+    const subtitleEl = document.getElementById(`earnedSubtitle-${event.id}`);
+    if (subtitleEl) {
+      const maxEarnable = calculateMaxEarnable(event);
+      const remaining = maxEarnable - totals.earned;
+      subtitleEl.textContent = `活動結束前還可以獲得: ${remaining} 個${event.currency}`;
+    }
   }
 
   // ===== Event Handlers =====
@@ -745,6 +848,13 @@
       });
     });
 
+    // Card select dropdowns
+    document.querySelectorAll(`.card-select[data-event="${event.id}"]`).forEach(sel => {
+      sel.addEventListener('change', function () {
+        handleCardChange(event, state, this);
+      });
+    });
+
     // Task +/- buttons (multi-claim)
     document.querySelectorAll(`.task-qty-btn[data-event="${event.id}"]`).forEach(btn => {
       btn.addEventListener('click', function () {
@@ -760,9 +870,16 @@
     });
 
     // Shop +/- buttons
-    document.querySelectorAll(`.qty-btn[data-event="${event.id}"]:not(.task-qty-btn)`).forEach(btn => {
+    document.querySelectorAll(`.qty-btn[data-event="${event.id}"]:not(.task-qty-btn):not(.shop-max-btn)`).forEach(btn => {
       btn.addEventListener('click', function () {
         handleShopQty(event, state, this);
+      });
+    });
+
+    // Shop MAX buttons
+    document.querySelectorAll(`.shop-max-btn[data-event="${event.id}"]`).forEach(btn => {
+      btn.addEventListener('click', function () {
+        handleShopMax(event, state, this);
       });
     });
 
@@ -859,6 +976,7 @@
   function handleTaskToggle(event, state, checkbox) {
     const taskId = checkbox.dataset.task;
     const taskType = checkbox.dataset.type;
+    const isCardSelect = checkbox.dataset.cardSelect === 'true';
     const isVariable = checkbox.dataset.variable === 'true';
     const maxReward = parseInt(checkbox.dataset.reward);
 
@@ -868,33 +986,35 @@
 
     const taskState = state.tasks[taskId];
     const periodKey = getPeriodKey(taskType, new Date(), event.startDate);
-
     const taskDef = findTask(event, taskId);
 
     if (checkbox.checked) {
-      const reward = maxReward;
-      taskState.currentPeriod = periodKey;
-      taskState.currentReward = reward;
-      addHistoryEntry(state, 'earn', taskId, reward);
-
-      if (taskDef && taskDef.weeklyBonus) {
-        const weekNum = getEventWeekNumber(event.startDate);
-        if (taskDef.weeklyBonus.weeks.includes(weekNum)) {
-          addHistoryEntry(state, 'earn', taskId + '_bonus', taskDef.weeklyBonus.amount);
+      if (isCardSelect && taskDef && taskDef.cardSelect) {
+        const selectedCard = taskState.selectedCard || taskDef.cardSelect[0].card;
+        const reward = getCardReward(taskDef, selectedCard, event.startDate);
+        taskState.currentPeriod = periodKey;
+        taskState.currentReward = reward;
+        taskState.selectedCard = selectedCard;
+        if (reward > 0) {
+          addHistoryEntry(state, 'earn', taskId, reward);
         }
+      } else {
+        const reward = maxReward;
+        taskState.currentPeriod = periodKey;
+        taskState.currentReward = reward;
+        addHistoryEntry(state, 'earn', taskId, reward);
       }
     } else {
-      if (taskDef && taskDef.weeklyBonus) {
-        removeHistoryEntry(state, 'earn', taskId + '_bonus', taskDef.weeklyBonus.amount);
+      if (taskState.currentReward > 0) {
+        removeHistoryEntry(state, 'earn', taskId, taskState.currentReward);
       }
-      removeHistoryEntry(state, 'earn', taskId, taskState.currentReward || 0);
       taskState.currentPeriod = null;
       taskState.currentReward = 0;
     }
 
     saveState(event.id, state);
 
-    if (isVariable || (taskDef && taskDef.weeklyBonus)) {
+    if (isVariable || isCardSelect) {
       rerenderTasks(event, state);
     } else {
       const taskItem = document.getElementById(`taskItem-${event.id}-${taskId}`);
@@ -932,6 +1052,26 @@
       removeHistoryEntry(state, 'earn', taskId, task.rewardPerClaim);
     } else {
       return;
+    }
+
+    if (task.streakBonus) {
+      if (!taskState.bonusWeeksCounted) taskState.bonusWeeksCounted = [];
+      const weekPeriod = getPeriodKey('weekly', new Date(), event.startDate);
+      const wasAtTarget = taskState.bonusWeeksCounted.length >= task.streakBonus.targetWeeks;
+
+      if (claims >= task.claims && !taskState.bonusWeeksCounted.includes(weekPeriod)) {
+        taskState.bonusWeeksCounted.push(weekPeriod);
+      } else if (claims < task.claims) {
+        const idx = taskState.bonusWeeksCounted.indexOf(weekPeriod);
+        if (idx !== -1) taskState.bonusWeeksCounted.splice(idx, 1);
+      }
+
+      const isAtTarget = taskState.bonusWeeksCounted.length >= task.streakBonus.targetWeeks;
+      if (!wasAtTarget && isAtTarget) {
+        addHistoryEntry(state, 'earn', taskId + '_streakbonus', task.streakBonus.reward);
+      } else if (wasAtTarget && !isAtTarget) {
+        removeHistoryEntry(state, 'earn', taskId + '_streakbonus', task.streakBonus.reward);
+      }
     }
 
     taskState.currentPeriod = claims > 0 ? periodKey : null;
@@ -977,6 +1117,12 @@
       });
     });
 
+    newSection.querySelectorAll(`.card-select[data-event="${event.id}"]`).forEach(sel => {
+      sel.addEventListener('change', function () {
+        handleCardChange(event, state, this);
+      });
+    });
+
     newSection.querySelectorAll(`.task-qty-btn[data-event="${event.id}"]`).forEach(btn => {
       btn.addEventListener('click', function () {
         handleTaskQty(event, state, this);
@@ -1011,6 +1157,38 @@
     taskState.currentReward = newReward;
 
     saveState(event.id, state);
+    updateSummaryDisplay(event, state);
+  }
+
+  function handleCardChange(event, state, select) {
+    const taskId = select.dataset.task;
+    const taskType = select.dataset.type;
+    const newCard = parseInt(select.value);
+    const taskDef = findTask(event, taskId);
+
+    if (!state.tasks[taskId]) {
+      state.tasks[taskId] = { currentPeriod: null, currentReward: 0 };
+    }
+
+    const taskState = state.tasks[taskId];
+    taskState.selectedCard = newCard;
+
+    const completed = isTaskCompleted(taskId, taskType, state, event.startDate);
+    if (completed && taskDef) {
+      const oldReward = taskState.currentReward || 0;
+      const newReward = getCardReward(taskDef, newCard, event.startDate);
+
+      if (oldReward > 0) {
+        removeHistoryEntry(state, 'earn', taskId, oldReward);
+      }
+      if (newReward > 0) {
+        addHistoryEntry(state, 'earn', taskId, newReward);
+      }
+      taskState.currentReward = newReward;
+    }
+
+    saveState(event.id, state);
+    rerenderTasks(event, state);
     updateSummaryDisplay(event, state);
   }
 
@@ -1073,8 +1251,49 @@
     if (parent) {
       const minusBtn = parent.querySelector('[data-action="minus"]');
       const plusBtn = parent.querySelector('[data-action="plus"]');
+      const maxBtn = parent.querySelector('.shop-max-btn');
       if (minusBtn) minusBtn.disabled = qty <= 0;
       if (plusBtn) plusBtn.disabled = qty >= item.maxQty;
+      if (maxBtn) maxBtn.disabled = qty >= item.maxQty;
+    }
+
+    updateSummaryDisplay(event, state);
+  }
+
+  function handleShopMax(event, state, button) {
+    const itemId = button.dataset.item;
+    const item = event.shop.find(i => i.id === itemId);
+    if (!item) return;
+
+    const currentQty = state.shop[itemId] || 0;
+    const toAdd = item.maxQty - currentQty;
+    if (toAdd <= 0) return;
+
+    for (let i = 0; i < toAdd; i++) {
+      addHistoryEntry(state, 'spend', itemId, item.cost);
+    }
+    state.shop[itemId] = item.maxQty;
+    saveState(event.id, state);
+
+    const qtyEl = document.getElementById(`shopQty-${event.id}-${itemId}`);
+    if (qtyEl) qtyEl.textContent = `${item.maxQty}/${item.maxQty}`;
+
+    const costEl = document.getElementById(`shopCost-${event.id}-${itemId}`);
+    if (costEl) {
+      const total = item.maxQty * item.cost;
+      costEl.textContent = total > 0 ? '-' + total : '';
+    }
+
+    const shopItem = document.getElementById(`shopItem-${event.id}-${itemId}`);
+    if (shopItem) shopItem.classList.add('purchased');
+
+    const parent = button.closest('.shop-controls');
+    if (parent) {
+      const minusBtn = parent.querySelector('[data-action="minus"]');
+      const plusBtn = parent.querySelector('[data-action="plus"]');
+      if (minusBtn) minusBtn.disabled = false;
+      if (plusBtn) plusBtn.disabled = true;
+      button.disabled = true;
     }
 
     updateSummaryDisplay(event, state);
@@ -1083,6 +1302,11 @@
   // ===== History Modal =====
 
   function resolveSourceName(event, source) {
+    if (source.endsWith('_streakbonus')) {
+      const baseId = source.replace('_streakbonus', '');
+      const task = findTask(event, baseId);
+      if (task) return task.name + ' (額外獎勵)';
+    }
     if (source.endsWith('_bonus')) {
       const baseId = source.replace('_bonus', '');
       const task = findTask(event, baseId);

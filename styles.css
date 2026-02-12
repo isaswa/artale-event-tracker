@@ -287,6 +287,16 @@ header h2 {
     border-color: var(--warning);
 }
 
+.summary-subtitle {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: block;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--input-border);
+    line-height: 1.4;
+}
+
 /* History Modal */
 .history-overlay {
     position: fixed;
@@ -675,12 +685,24 @@ header h2 {
     flex-shrink: 0;
 }
 
-.task-item.has-bonus {
+.task-item.has-card-info {
     border-radius: 6px 6px 0 0;
     margin-bottom: 0;
 }
 
-.task-bonus {
+.card-select {
+    padding: 4px 8px;
+    font-size: 13px;
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    margin-left: 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.card-info {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -693,13 +715,42 @@ header h2 {
     border-top: 1px dashed var(--input-border);
 }
 
-.task-bonus.active {
+.card-info.bonus-week {
     color: var(--text-color);
     background-color: var(--input-bg);
     border-top-color: transparent;
 }
 
-.task-bonus.claimed {
+.card-info-week {
+    font-weight: 600;
+    white-space: nowrap;
+    margin-left: 8px;
+}
+
+.task-reward-alt {
+    color: var(--text-secondary) !important;
+    font-weight: 500;
+}
+
+.task-item.has-streak-bonus {
+    border-radius: 6px 6px 0 0;
+    margin-bottom: 0;
+}
+
+.streak-bonus {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background-color: var(--result-bg);
+    border-radius: 0 0 6px 6px;
+    margin-bottom: 6px;
+    border-top: 1px dashed var(--input-border);
+}
+
+.streak-bonus.claimed {
     color: var(--success);
     background-color: var(--success-light);
 }
@@ -790,6 +841,13 @@ header h2 {
 .qty-btn:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+}
+
+.shop-max-btn {
+    width: auto;
+    padding: 0 8px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
 }
 
 .qty-display {
@@ -967,6 +1025,10 @@ footer {
 
     .summary-card .summary-label {
         font-size: 12px;
+    }
+
+    .summary-subtitle {
+        font-size: 10px;
     }
 
     .section-header {

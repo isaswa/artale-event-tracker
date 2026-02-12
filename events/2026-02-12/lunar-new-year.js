@@ -23,7 +23,7 @@ const EVENTS = [
           ]
         },
         { id: 'reunion_dinner', name: '想吃熱騰騰的團圓飯', reward: 1, note: '收集食材各 10 個' },
-        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '2 分鐘挑戰，每次1個紅包' },
+        { id: 'pegasus_shoot', name: '天馬亂射 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包' },
         { id: 'dodge_centaur', name: '躲避半人馬 (小遊戲)', reward: 3, claims: 3, rewardPerClaim: 1, note: '每次1~3個紅包', streakBonus: { targetWeeks: 3, reward: 20 } },
         { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得' }
       ],

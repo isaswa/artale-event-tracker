@@ -28,7 +28,7 @@ const EVENTS = [
         { id: 'horse_first', name: '一馬當先 (小遊戲)', reward: 2, note: '通關即可獲得', npc: '薇薇安' }
       ],
       biweekly: [
-        { id: 'team_quest', name: '滿滿春節組隊任務', reward: 3, note: '需組隊完成，含協作憑證獎勵', npc: 'GM露露' }
+        { id: 'team_quest', name: '滿滿春節組隊任務', reward: 3, minReward: 1, variable: true, note: '需組隊完成，含協作憑證獎勵', npc: 'GM露露' }
       ],
       onetime: [
         { id: 'spring_cleaning', name: '迎接春節的大掃除', reward: 10, note: '打怪收集垃圾堆 x30', npc: 'GM露露' },

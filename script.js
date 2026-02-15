@@ -151,6 +151,14 @@
     return null;
   }
 
+  function getTaskUnitReward(task) {
+    if (task.claims) return task.rewardPerClaim;
+    if (task.cardSelect) return 1;
+    return task.reward;
+  }
+
+  const PENCIL_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm1.414 1.06a.25.25 0 0 0-.354 0L3.463 11.1l-.47 1.642 1.642-.47 8.61-8.61a.25.25 0 0 0 0-.354l-1.086-1.086Z"/></svg>';
+
   function getSelectedEvent() {
     const saved = localStorage.getItem('artale_selected_event');
     const sorted = [...EVENTS].sort((a, b) => b.startDate.localeCompare(a.startDate));
@@ -547,7 +555,10 @@
         </div>
         <div class="section-body${checkinCollapsed ? ' collapsed' : ''}" id="sectionBody-checkin-${event.id}">
           <div class="checkin-status" id="checkinStatus-${event.id}">
-            <span class="checkin-text">已簽到 <strong>${count}</strong> / ${maxDays} 天</span>
+            <div class="checkin-text-group">
+              <span class="checkin-text">已簽到 <strong>${count}</strong> / ${maxDays} 天</span>
+              <button class="btn-edit-past btn-edit-past-checkin" id="editCheckin-${event.id}" title="編輯簽到紀錄">${PENCIL_SVG}</button>
+            </div>
             <div>${btnHtml}</div>
           </div>
           <div class="checkin-progress">
@@ -697,6 +708,7 @@
         ${cardSelectHtml}
         ${rewardHtml}
         ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
+        <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
       </div>
       ${cardInfoHtml}
     `;
@@ -741,6 +753,7 @@
         </div>
         <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
         ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
+        <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
       </div>
       ${bonusHtml}
     `;
@@ -900,6 +913,23 @@
       });
     });
 
+    // Edit past record buttons (tasks)
+    document.querySelectorAll(`.btn-edit-past[data-task][data-event="${event.id}"]`).forEach(btn => {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showEditPastModal(event, state, this.dataset.task);
+      });
+    });
+
+    // Edit past record button (check-in)
+    const editCheckinBtn = document.getElementById(`editCheckin-${event.id}`);
+    if (editCheckinBtn) {
+      editCheckinBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showEditCheckinModal(event, state);
+      });
+    }
+
     // Shop checkboxes (for maxQty=1 items)
     document.querySelectorAll(`.shop-checkbox[data-event="${event.id}"]`).forEach(cb => {
       cb.addEventListener('change', function () {
@@ -1007,6 +1037,13 @@
         const icon = document.getElementById(`toggleIcon-${sectionKey}`);
         if (body) body.classList.toggle('collapsed');
         if (icon) icon.classList.toggle('collapsed');
+      });
+    }
+    const editCheckinBtn = document.getElementById(`editCheckin-${event.id}`);
+    if (editCheckinBtn) {
+      editCheckinBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showEditCheckinModal(event, state);
       });
     }
   }
@@ -1164,6 +1201,13 @@
     newSection.querySelectorAll(`.task-qty-btn[data-event="${event.id}"]`).forEach(btn => {
       btn.addEventListener('click', function () {
         handleTaskQty(event, state, this);
+      });
+    });
+
+    newSection.querySelectorAll(`.btn-edit-past[data-task][data-event="${event.id}"]`).forEach(btn => {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showEditPastModal(event, state, this.dataset.task);
       });
     });
 
@@ -1340,6 +1384,11 @@
   // ===== History Modal =====
 
   function resolveSourceName(event, source) {
+    if (source.endsWith('_past')) {
+      const baseId = source.replace('_past', '');
+      const task = findTask(event, baseId);
+      if (task) return task.name;
+    }
     if (source.endsWith('_streakbonus')) {
       const baseId = source.replace('_streakbonus', '');
       const task = findTask(event, baseId);
@@ -1380,7 +1429,9 @@
       let entriesHtml = '';
       for (const entry of entries) {
         const name = resolveSourceName(event, entry.source);
-        entriesHtml += `<div class="history-entry"><span>${name}</span><span>${sign}${entry.amount}</span></div>`;
+        const isManual = entry.source.endsWith('_past');
+        const manualTag = isManual ? '<span class="history-manual-tag">手動補登</span>' : '';
+        entriesHtml += `<div class="history-entry${isManual ? ' history-entry-manual' : ''}"><span>${name}${manualTag}</span><span>${sign}${entry.amount}</span></div>`;
       }
 
       bodyHtml += `
@@ -1421,6 +1472,157 @@
 
   function closeHistoryModal() {
     const modal = document.getElementById('historyModal');
+    if (modal) modal.remove();
+  }
+
+  // ===== Edit Past Records =====
+
+  function showEditPastModal(event, state, taskId) {
+    const task = findTask(event, taskId);
+    if (!task) return;
+
+    const unitReward = getTaskUnitReward(task);
+    if (!state.tasks[taskId]) {
+      state.tasks[taskId] = { currentPeriod: null, currentReward: 0 };
+    }
+    const pastReward = state.tasks[taskId].pastReward || 0;
+
+    const modal = document.createElement('div');
+    modal.className = 'edit-past-overlay';
+    modal.id = 'editPastModal';
+    modal.innerHTML = `
+      <div class="edit-past-modal">
+        <div class="edit-past-modal-header">
+          <h3>編輯過去紀錄</h3>
+          <button class="edit-past-close" id="editPastClose">&times;</button>
+        </div>
+        <div class="edit-past-modal-body">
+          <span class="edit-past-label">${task.name}</span>
+          <div class="edit-past-controls">
+            <button class="qty-btn" id="editPastMinus" ${pastReward <= 0 ? 'disabled' : ''}>-</button>
+            <span class="edit-past-value" id="editPastValue">${pastReward}</span>
+            <button class="qty-btn" id="editPastPlus">+</button>
+          </div>
+          <div class="edit-past-reward-info">每次 ±${unitReward} ${event.currency}</div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeEditPastModal();
+    });
+    document.getElementById('editPastClose').addEventListener('click', closeEditPastModal);
+
+    document.getElementById('editPastPlus').addEventListener('click', function () {
+      const ts = state.tasks[taskId];
+      ts.pastReward = (ts.pastReward || 0) + unitReward;
+      addHistoryEntry(state, 'earn', taskId + '_past', unitReward);
+      saveState(event.id, state);
+      updateEditPastDisplay(ts.pastReward);
+      updateSummaryDisplay(event, state);
+    });
+
+    document.getElementById('editPastMinus').addEventListener('click', function () {
+      const ts = state.tasks[taskId];
+      if ((ts.pastReward || 0) <= 0) return;
+      ts.pastReward = (ts.pastReward || 0) - unitReward;
+      removeHistoryEntry(state, 'earn', taskId + '_past', unitReward);
+      saveState(event.id, state);
+      updateEditPastDisplay(ts.pastReward);
+      updateSummaryDisplay(event, state);
+    });
+  }
+
+  function updateEditPastDisplay(pastReward) {
+    const valueEl = document.getElementById('editPastValue');
+    const minusBtn = document.getElementById('editPastMinus');
+    if (valueEl) valueEl.textContent = pastReward;
+    if (minusBtn) minusBtn.disabled = pastReward <= 0;
+  }
+
+  function showEditCheckinModal(event, state) {
+    const count = state.checkin.count;
+    const maxDays = event.checkin.maxDays;
+
+    const start = new Date(event.startDate + 'T00:00:00Z');
+    const now = new Date();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const daysSinceStart = Math.floor((now - start) / dayMs) + 1;
+    const theoreticalMax = Math.min(daysSinceStart, maxDays);
+
+    const modal = document.createElement('div');
+    modal.className = 'edit-past-overlay';
+    modal.id = 'editPastModal';
+    modal.innerHTML = `
+      <div class="edit-past-modal">
+        <div class="edit-past-modal-header">
+          <h3>編輯簽到紀錄</h3>
+          <button class="edit-past-close" id="editPastClose">&times;</button>
+        </div>
+        <div class="edit-past-modal-body">
+          <span class="edit-past-label">調整已簽到天數</span>
+          <div class="edit-past-controls">
+            <button class="qty-btn" id="editCheckinMinus" ${count <= 0 ? 'disabled' : ''}>-</button>
+            <span class="edit-past-value" id="editCheckinValue">${count} / ${maxDays}</span>
+            <button class="qty-btn" id="editCheckinPlus" ${count >= theoreticalMax ? 'disabled' : ''}>+</button>
+          </div>
+          <div class="edit-past-reward-info">最多可簽到 ${theoreticalMax} 天（活動已開始 ${daysSinceStart} 天）</div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    function onClose() {
+      closeEditPastModal();
+      rerenderCheckin(event, state);
+    }
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) onClose();
+    });
+    document.getElementById('editPastClose').addEventListener('click', onClose);
+
+    document.getElementById('editCheckinPlus').addEventListener('click', function () {
+      if (state.checkin.count >= theoreticalMax) return;
+      state.checkin.count++;
+      for (const m of event.checkin.milestones) {
+        if (state.checkin.count >= m.day && state.checkin.count - 1 < m.day) {
+          addHistoryEntry(state, 'earn', 'checkin_day' + m.day, m.reward);
+        }
+      }
+      saveState(event.id, state);
+      updateEditCheckinDisplay(state.checkin.count, maxDays, theoreticalMax);
+      updateSummaryDisplay(event, state);
+    });
+
+    document.getElementById('editCheckinMinus').addEventListener('click', function () {
+      if (state.checkin.count <= 0) return;
+      for (const m of event.checkin.milestones) {
+        if (state.checkin.count >= m.day && state.checkin.count - 1 < m.day) {
+          removeHistoryEntry(state, 'earn', 'checkin_day' + m.day, m.reward);
+        }
+      }
+      state.checkin.count--;
+      saveState(event.id, state);
+      updateEditCheckinDisplay(state.checkin.count, maxDays, theoreticalMax);
+      updateSummaryDisplay(event, state);
+    });
+  }
+
+  function updateEditCheckinDisplay(count, maxDays, theoreticalMax) {
+    const valueEl = document.getElementById('editCheckinValue');
+    const minusBtn = document.getElementById('editCheckinMinus');
+    const plusBtn = document.getElementById('editCheckinPlus');
+    if (valueEl) valueEl.textContent = count + ' / ' + maxDays;
+    if (minusBtn) minusBtn.disabled = count <= 0;
+    if (plusBtn) plusBtn.disabled = count >= theoreticalMax;
+  }
+
+  function closeEditPastModal() {
+    const modal = document.getElementById('editPastModal');
     if (modal) modal.remove();
   }
 

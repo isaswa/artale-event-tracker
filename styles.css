@@ -395,6 +395,22 @@ header h2 {
     margin-bottom: 4px;
 }
 
+.history-entry-manual {
+    opacity: 0.75;
+    border-left: 2px solid var(--text-secondary);
+}
+
+.history-manual-tag {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background-color: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
 .history-entry:last-child {
     margin-bottom: 0;
 }
@@ -404,6 +420,97 @@ header h2 {
     color: var(--text-secondary);
     padding: 24px;
     font-size: 14px;
+}
+
+/* Edit Past Records Modal */
+.edit-past-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 20px;
+}
+
+.edit-past-modal {
+    background-color: var(--container-bg);
+    border-radius: 12px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.edit-past-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--input-border);
+}
+
+.edit-past-modal-header h3 {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.edit-past-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.edit-past-close:hover {
+    color: var(--primary);
+}
+
+.edit-past-modal-body {
+    padding: 20px;
+    text-align: center;
+}
+
+.edit-past-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    display: block;
+}
+
+.edit-past-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.edit-past-controls .qty-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
+}
+
+.edit-past-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary);
+    min-width: 60px;
+    text-align: center;
+}
+
+.edit-past-reward-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 8px;
 }
 
 /* Sections */
@@ -710,6 +817,37 @@ header h2 {
     flex-shrink: 0;
     min-width: 72px;
     text-align: right;
+}
+
+.btn-edit-past {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 8px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.4;
+    transition: all 0.2s ease;
+}
+
+.btn-edit-past:hover {
+    opacity: 1;
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-edit-past-checkin {
+    margin-left: 8px;
+}
+
+.checkin-text-group {
+    display: flex;
+    align-items: center;
 }
 
 .task-item.has-card-info {
@@ -1129,6 +1267,10 @@ footer {
 
     .task-group-npc-label {
         display: none;
+    }
+
+    .btn-edit-past {
+        margin-left: 4px;
     }
 
     .shop-item {

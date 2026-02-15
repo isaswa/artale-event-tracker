@@ -609,6 +609,7 @@
             <div class="task-group-header-right">
               ${countdownHtml}
               <span class="task-group-npc-label">任務NPC</span>
+              <span class="task-group-edit-label">補登</span>
             </div>
           </div>
           ${tasksHtml}
@@ -693,24 +694,30 @@
     }
 
     return `
-      <div class="task-item${extraClass} ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
-        <input type="checkbox" class="task-checkbox"
-          id="task-${event.id}-${task.id}"
-          data-event="${event.id}"
-          data-task="${task.id}"
-          data-type="${type}"
-          ${task.cardSelect ? 'data-card-select="true"' : `data-reward="${task.reward}" data-min-reward="${task.minReward || task.reward}" data-variable="${!!task.variable}"`}
-          ${completed ? 'checked' : ''}>
-        <div class="task-info">
-          <span class="task-name">${task.name}</span>
-          <span class="task-note">${task.note || ''}</span>
+      <div class="task-row">
+        <div class="task-row-content">
+          <div class="task-item${extraClass} ${completed ? 'completed' : ''}" id="taskItem-${event.id}-${task.id}">
+            <input type="checkbox" class="task-checkbox"
+              id="task-${event.id}-${task.id}"
+              data-event="${event.id}"
+              data-task="${task.id}"
+              data-type="${type}"
+              ${task.cardSelect ? 'data-card-select="true"' : `data-reward="${task.reward}" data-min-reward="${task.minReward || task.reward}" data-variable="${!!task.variable}"`}
+              ${completed ? 'checked' : ''}>
+            <div class="task-info">
+              <span class="task-name">${task.name}</span>
+              <span class="task-note">${task.note || ''}</span>
+            </div>
+            ${cardSelectHtml}
+            ${rewardHtml}
+            ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
+          </div>
+          ${cardInfoHtml}
         </div>
-        ${cardSelectHtml}
-        ${rewardHtml}
-        ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
-        <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
+        <div class="task-row-edit">
+          <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
+        </div>
       </div>
-      ${cardInfoHtml}
     `;
   }
 
@@ -741,21 +748,27 @@
     }
 
     return `
-      <div class="task-item${hasBonus} ${statusClass}" id="taskItem-${event.id}-${task.id}">
-        <div class="task-claims-control">
-          <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="minus" ${claims <= 0 ? 'disabled' : ''}>-</button>
-          <span class="qty-display" id="taskQty-${event.id}-${task.id}">${claims}/${maxClaims}</span>
-          <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="plus" ${claims >= maxClaims ? 'disabled' : ''}>+</button>
+      <div class="task-row">
+        <div class="task-row-content">
+          <div class="task-item${hasBonus} ${statusClass}" id="taskItem-${event.id}-${task.id}">
+            <div class="task-claims-control">
+              <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="minus" ${claims <= 0 ? 'disabled' : ''}>-</button>
+              <span class="qty-display" id="taskQty-${event.id}-${task.id}">${claims}/${maxClaims}</span>
+              <button class="qty-btn task-qty-btn" data-event="${event.id}" data-task="${task.id}" data-type="${type}" data-action="plus" ${claims >= maxClaims ? 'disabled' : ''}>+</button>
+            </div>
+            <div class="task-info">
+              <span class="task-name">${task.name}</span>
+              <span class="task-note">${task.note || ''}</span>
+            </div>
+            <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
+            ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
+          </div>
+          ${bonusHtml}
         </div>
-        <div class="task-info">
-          <span class="task-name">${task.name}</span>
-          <span class="task-note">${task.note || ''}</span>
+        <div class="task-row-edit">
+          <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
         </div>
-        <span class="task-reward">+${claims * task.rewardPerClaim}/${task.reward} ${event.currency}</span>
-        ${task.npc ? `<span class="task-npc">${task.npc}</span>` : ''}
-        <button class="btn-edit-past" data-event="${event.id}" data-task="${task.id}" data-type="${type}" title="編輯過去紀錄">${PENCIL_SVG}</button>
       </div>
-      ${bonusHtml}
     `;
   }
 
